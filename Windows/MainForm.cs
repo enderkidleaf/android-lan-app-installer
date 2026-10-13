@@ -15,22 +15,24 @@ public class MainForm : Form
     readonly CheckBox split = new() { Text = "拆分 APK（所有文件属于同一应用）", AutoSize = true };
     readonly TextBox logs = new() { Multiline = true, ReadOnly = true, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Vertical, Font = new Font("Consolas", 9), WordWrap = true };
     readonly List<string> paths = [];
+    readonly DataGridView installedRows = new() { Dock = DockStyle.Fill, ReadOnly = true, AllowUserToAddRows = false, AllowUserToDeleteRows = false, RowHeadersVisible = false, AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill, AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCells, BackgroundColor = Color.White, BorderStyle = BorderStyle.None };
     readonly List<Control> locked = [];
     readonly Button install, stop;
     bool busy, installing, stopRemaining;
 
     public MainForm(string[] initial)
     {
-        Text = "局域网安卓设备安装助手 · Windows"; Size = new Size(1060, 880); MinimumSize = new Size(900, 760);
+        Text = "局域网安卓设备安装助手 · Windows"; Size = new Size(1060, 1040); MinimumSize = new Size(900, 920);
         StartPosition = FormStartPosition.CenterScreen; BackColor = Background; ForeColor = Ink;
         Font = new Font("Microsoft YaHei UI", 10); AutoScaleMode = AutoScaleMode.Dpi;
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
-        var root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(26), ColumnCount = 1, RowCount = 6 };
+        var root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(26), ColumnCount = 1, RowCount = 7 };
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 76));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 220));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 58));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 48));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 25));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 65));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 42));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 27));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
         Controls.Add(root);
         root.Controls.Add(new Label { Text = "把喜欢的应用，装上设备。\n发现设备，选择 APK，一键安装。", AutoSize = true, Font = new Font(Font.FontFamily, 18, FontStyle.Bold), Padding = new Padding(0, 0, 0, 12) }, 0, 0);
@@ -60,13 +62,19 @@ public class MainForm : Form
         install = Button("开始安装", Install, true); stop = Button("停止后续安装", StopQueue, tracked: false); stop.Enabled = false;
         apk.Controls.Add(Row(split, new Label { Text = "覆盖更新，保留应用数据", AutoSize = true }, stop, install), 0, 3); locked.Add(split);
 
+        var historyCard = Card(2); historyCard.RowStyles.Clear(); historyCard.RowStyles.Add(new RowStyle(SizeType.Absolute, 40)); historyCard.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        historyCard.Controls.Add(Row(new Label { Text = "03  已安装 · 本次会话的成功记录，不会参与后续安装", AutoSize = true, Font = new Font(Font, FontStyle.Bold) }, Button("清空记录", ClearInstalled, tracked: false)), 0, 0);
+        installedRows.Columns.Add("file", "APK 文件"); installedRows.Columns.Add("size", "大小"); installedRows.Columns.Add("target", "安装目标"); installedRows.Columns.Add("time", "完成时间");
+        installedRows.Columns[0].FillWeight = 32; installedRows.Columns[1].FillWeight = 12; installedRows.Columns[2].FillWeight = 36; installedRows.Columns[3].FillWeight = 20;
+        installedRows.DefaultCellStyle.WrapMode = DataGridViewTriState.True; installedRows.DefaultCellStyle.ForeColor = Color.ForestGreen; historyCard.Controls.Add(installedRows, 0, 1); root.Controls.Add(historyCard, 0, 3);
+
         var statusPanel = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2 };
         statusPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 48)); statusPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 8));
-        statusPanel.Controls.Add(status); statusPanel.Controls.Add(progress); root.Controls.Add(statusPanel, 0, 3);
+        statusPanel.Controls.Add(status); statusPanel.Controls.Add(progress); root.Controls.Add(statusPanel, 0, 4);
         var logCard = Card(2); logCard.RowStyles.Clear(); logCard.RowStyles.Add(new RowStyle(SizeType.Absolute, 32)); logCard.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         logCard.Controls.Add(Row(new Label { Text = "操作日志", AutoSize = true, Font = new Font(Font, FontStyle.Bold) }, Button("导出日志", Export, tracked: false), Button("准备教程", Preparation, tracked: false), Button("使用帮助", Help, tracked: false)), 0, 0);
-        logCard.Controls.Add(logs, 0, 1); root.Controls.Add(logCard, 0, 4);
-        root.Controls.Add(new Label { Text = "v1.2.0  ·  官方 ADB  ·  Windows 10 / 11", ForeColor = Color.DimGray, AutoSize = true }, 0, 5);
+        logCard.Controls.Add(logs, 0, 1); root.Controls.Add(logCard, 0, 5);
+        root.Controls.Add(new Label { Text = "v1.3.0  ·  官方 ADB  ·  Windows 10 / 11", ForeColor = Color.DimGray, AutoSize = true }, 0, 6);
         Shown += async (_, _) => { AddFiles(initial); LoadNetworks(); await Guard(RefreshDevices); };
         devices.SelectedIndexChanged += (_, _) => UpdateInstall();
         FormClosing += (_, e) => { if (installing && MessageBox.Show("安装仍在进行。退出会停止后续队列，当前安装结果需在设备上确认。是否退出？", Text, MessageBoxButtons.YesNo) != DialogResult.Yes) e.Cancel = true; };
@@ -152,19 +160,20 @@ public class MainForm : Form
     }
     Task Remove() { foreach (var i in queue.SelectedRows.Cast<DataGridViewRow>().Select(r => r.Index).OrderDescending()) { paths.RemoveAt(i); queue.Rows.RemoveAt(i); } return Task.CompletedTask; }
     Task Clear() { paths.Clear(); queue.Rows.Clear(); return Task.CompletedTask; }
+    Task ClearInstalled() { installedRows.Rows.Clear(); return Task.CompletedTask; }
     Task StopQueue() { stopRemaining = true; stop.Enabled = false; return Task.CompletedTask; }
     async Task Install()
     {
         if (devices.SelectedItem is not Device { Ready: true } target || paths.Count == 0) return;
         installing = true; stopRemaining = false; stop.Enabled = true;
-        var files = paths.ToArray(); bool multiple = split.Checked;
+        var files = paths.ToArray(); var originalRows = files.Select((file, index) => (file, row: queue.Rows[index])).ToDictionary(x => x.file, x => x.row, StringComparer.OrdinalIgnoreCase); bool multiple = split.Checked;
         var groups = multiple ? new[] { files } : files.Select(f => new[] { f }).ToArray(); int success = 0, failure = 0;
         foreach (DataGridViewRow row in queue.Rows) { row.Cells[2].Value = "待安装"; row.DefaultCellStyle.ForeColor = Ink; }
         for (int i = 0; i < groups.Length; i++)
         {
             if (stopRemaining) break;
             Notice($"正在安装到 {target.Name} · {target.Serial}：{i + 1} / {groups.Length}");
-            var indices = groups[i].Select(f => Array.IndexOf(files, f)).ToArray(); foreach (int index in indices) queue.Rows[index].Cells[2].Value = "安装中";
+            var rows = groups[i].Select(f => originalRows[f]).ToArray(); foreach (var row in rows) row.Cells[2].Value = "安装中";
             bool ok = false; string detail;
             try
             {
@@ -175,7 +184,16 @@ public class MainForm : Form
                 detail = ok ? "安装成功" : Errors.Friendly(result.Output);
             }
             catch (Exception e) { detail = Errors.Friendly(e.Message); Log(detail); }
-            foreach (int index in indices) { queue.Rows[index].Cells[2].Value = ok ? detail : "安装失败：" + detail; queue.Rows[index].DefaultCellStyle.ForeColor = ok ? Color.ForestGreen : Color.Firebrick; }
+            if (ok) {
+                foreach (string file in groups[i]) {
+                    var row = originalRows[file];
+                    installedRows.Rows.Insert(0, Path.GetFileName(file), row.Cells[1].Value ?? "", $"{target.Name} · {target.Serial}", DateTime.Now.ToString("MM-dd HH:mm:ss"));
+                    installedRows.Rows[0].Cells[0].ToolTipText = file;
+                    paths.Remove(file); queue.Rows.Remove(row);
+                }
+            } else {
+                foreach (var row in rows) { row.Cells[2].Value = "安装失败：" + detail; row.DefaultCellStyle.ForeColor = Color.Firebrick; }
+            }
             if (ok) success++; else failure++; progress.Value = (i + 1) * 1000 / groups.Length;
         }
         if (stopRemaining) foreach (DataGridViewRow row in queue.Rows) if ((string?)row.Cells[2].Value == "待安装") row.Cells[2].Value = "已跳过";
