@@ -15,6 +15,22 @@ struct APKItem: Identifiable {
     var detail = ""
 }
 
+struct InstalledAPKItem: Identifiable {
+    let id = UUID()
+    let name: String
+    let size: Int64
+    let target: String
+    let date: Date?
+    init(name: String, size: Int64, target: String, date: Date? = Date()) {
+        self.name = name; self.size = size; self.target = target; self.date = date
+    }
+}
+
+struct InstalledHistorySnapshot: Decodable {
+    struct Entry: Decodable { let name: String; let size: Int64; let target: String }
+    let entries: [Entry]
+}
+
 struct LogEntry: Identifiable {
     let id = UUID()
     let date = Date()
@@ -29,6 +45,7 @@ final class InstallerModel: ObservableObject {
     @Published var networkID = ""
     @Published var address = ""
     @Published var files: [APKItem] = []
+    @Published var installedFiles: [InstalledAPKItem] = []
     @Published var splitMode = false
     @Published var busy = false
     @Published var installing = false
@@ -50,11 +67,21 @@ final class InstallerModel: ObservableObject {
     var network: LAN? { networks.first { $0.id == networkID } }
     var canInstall: Bool { !busy && selected?.ready == true && !files.isEmpty }
 
-    init() {
+    init(client: ADBClient? = nil) {
         let path = Bundle.main.url(forResource: "adb", withExtension: nil)
             ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("Resources/adb")
-        client = ADBClient(executable: path)
+        self.client = client ?? ADBClient(executable: path)
         networkID = networks.first?.id ?? ""
+        // Preserve an observed old-version session during an in-place update.
+        // This imports display records only and never adds an APK to the install queue.
+        if client == nil, let flag = CommandLine.arguments.firstIndex(of: "--restore-installed-history-json"),
+           CommandLine.arguments.indices.contains(flag + 1) {
+            do {
+                guard let data = Data(base64Encoded: CommandLine.arguments[flag + 1]) else { throw ToolError.message("无效的旧版记录数据") }
+                let snapshot = try JSONDecoder().decode(InstalledHistorySnapshot.self, from: data)
+                installedFiles = snapshot.entries.map { InstalledAPKItem(name: $0.name, size: $0.size, target: $0.target, date: nil) }
+            } catch { log("旧版成功记录恢复失败：\(error.localizedDescription)") }
+        }
     }
 
     func log(_ text: String) {
@@ -259,7 +286,12 @@ final class InstallerModel: ObservableObject {
                 case .failure(let error): success = false; detail = error.localizedDescription; log(detail)
                 }
                 for i in files.indices where ids.contains(files[i].id) { files[i].state = success ? "安装成功" : "安装失败"; files[i].detail = detail }
-                if success { successes += 1 } else { failures += 1 }
+                if success {
+                    let completed = files.filter { ids.contains($0.id) }
+                    installedFiles.append(contentsOf: completed.map { InstalledAPKItem(name: $0.url.lastPathComponent, size: $0.size, target: "\(target.title) · \(target.serial)") })
+                    files.removeAll { ids.contains($0.id) }
+                    successes += 1
+                } else { failures += 1 }
                 progress = Double(index + 1) / Double(groups.count)
             }
             if cancelRemaining {
@@ -330,6 +362,7 @@ struct InstallerView: View {
                     header
                     deviceCard
                     apkCard
+                    installedCard
                     statusCard
                     HStack {
                         Label("官方 ADB · 文件经局域网直接传到设备", systemImage: "network")
@@ -382,7 +415,7 @@ struct InstallerView: View {
                 }
                 Text(model.network?.ip ?? "检查 Wi-Fi / 以太网").font(.system(size: 11, design: .monospaced)).foregroundStyle(muted)
             }
-            Text("v1.2.0 · macOS").font(.system(size: 10)).foregroundStyle(muted.opacity(0.75))
+            Text("v1.3.0 · macOS").font(.system(size: 10)).foregroundStyle(muted.opacity(0.75))
         }.padding(24).frame(width: 220).background(Color.white)
             .overlay(alignment: .trailing) { Rectangle().fill(ink.opacity(0.06)).frame(width: 1) }
     }
@@ -562,6 +595,43 @@ struct InstallerView: View {
         }
     }
 
+    var installedCard: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    SectionTitle(number: "03", title: "已安装", subtitle: "本次会话的成功记录，不会参与后续安装")
+                    Spacer()
+                    if !model.installedFiles.isEmpty {
+                        Button("清空记录") { model.installedFiles.removeAll() }.buttonStyle(.borderless)
+                            .font(.system(size: 11)).disabled(model.installing).help("只清空记录，不卸载目标设备的应用")
+                    }
+                }
+                if model.installedFiles.isEmpty {
+                    Text("安装成功的 APK 会自动移到这里，失败或未安装的文件仍留在添加应用。")
+                        .font(.system(size: 11)).foregroundStyle(muted)
+                } else {
+                    ForEach(model.installedFiles.reversed()) { item in
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(item.name).font(.system(size: 12, weight: .medium)).lineLimit(1).help(item.name)
+                                Text(item.target).font(.system(size: 10)).foregroundStyle(muted).textSelection(.enabled)
+                                if let date = item.date {
+                                    Text(date, format: .dateTime.month().day().hour().minute().second()).font(.system(size: 10)).foregroundStyle(muted)
+                                } else {
+                                    Text("旧版会话的成功记录").font(.system(size: 10)).foregroundStyle(muted)
+                                }
+                            }
+                            Spacer()
+                            Text(ByteCountFormatter.string(fromByteCount: item.size, countStyle: .file)).font(.system(size: 10)).foregroundStyle(muted)
+                            Text("安装成功").font(.system(size: 10)).foregroundStyle(.green)
+                        }.padding(.vertical, 5)
+                    }
+                }
+            }
+        }
+    }
+
     var statusCard: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: model.bannerError ? "exclamationmark.circle" : "info.circle").font(.system(size: 14))
@@ -663,6 +733,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 enum AppState { @MainActor static weak var model: InstallerModel? }
 
+#if !QUEUE_TESTING
 @main
 @MainActor
 struct TVInstallerApp: App {
@@ -684,3 +755,5 @@ struct TVInstallerApp: App {
             }
     }
 }
+
+#endif
