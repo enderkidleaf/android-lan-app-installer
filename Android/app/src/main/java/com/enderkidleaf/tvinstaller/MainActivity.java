@@ -21,12 +21,12 @@ import java.util.zip.ZipFile;
 public class MainActivity extends Activity {
     static final int ORANGE=0xffeb5822,INK=0xff232d32,MUTED=0xff6c757a,BG=0xfff7f7f2, PICK_APK=101, EXPORT_LOG=102;
     final ExecutorService worker=Executors.newSingleThreadExecutor();
-    final List<Apk> files=new ArrayList<>(); final List<AdbCore.Lan> lans=new ArrayList<>();
+    final List<Apk> files=new ArrayList<>(); final List<Apk> installedFiles=new ArrayList<>(); final List<AdbCore.Lan> lans=new ArrayList<>();
     final List<View> lockable=new ArrayList<>(); final StringBuilder log=new StringBuilder();
-    EditText address; Spinner networks; LinearLayout deviceViews,fileViews; TextView banner,targetLabel; Button install,stop;
+    EditText address; Spinner networks; LinearLayout deviceViews,fileViews,installedViews; TextView banner,targetLabel; Button install,stop;
     ProgressBar progress; CheckBox split; volatile boolean busy,stopRemaining; AdbCore.Endpoint selected; AdbCore.Keys keys;
     volatile AdbCore.Connection active;
-    static final class Apk {final File file;final String name;String state="待安装",detail="";Apk(File f,String n){file=f;name=n;}}
+    static final class Apk {final File file;final String name;final long size;String state="待安装",detail="",target="";long installedAt;Apk(File f,String n){file=f;name=n;size=f.length();}}
     interface Work {void run()throws Exception;}
 
     public void onCreate(Bundle state){
@@ -55,8 +55,10 @@ public class MainActivity extends Activity {
         progress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);progress.setMax(1000);progress.setProgressTintList(android.content.res.ColorStateList.valueOf(ORANGE));apk.addView(progress,new LinearLayout.LayoutParams(-1,dp(7)));
         install=button("开始安装",()->runWork(this::install),true);apk.addView(install);
         stop=button("停止后续安装",()->{stopRemaining=true;stop.setEnabled(false);notice("当前安装结束后将停止队列。",false);},false,false);stop.setVisibility(View.GONE);apk.addView(stop);
+        space(root,16);LinearLayout history=card();root.addView(history);history.addView(text("03  已安装",18,true));history.addView(text("本次会话的成功记录，不会参与后续安装。",12,false));
+        installedViews=vertical();history.addView(installedViews);history.addView(button("清空记录",()->{installedFiles.clear();renderInstalled();},false,false));renderInstalled();
         space(root,16);banner=text("准备就绪：先发现设备或输入 IP 连接。",13,false);banner.setPadding(dp(14),dp(12),dp(14),dp(12));banner.setBackground(round(0xffeeeeE8,10));root.addView(banner);
-        root.addView(button("连接前准备教程",this::preparation,false,false));root.addView(button("使用帮助",this::help,false,false));root.addView(text("v1.2.0 · Android 8+ · 局域网 ADB",11,false));
+        root.addView(button("连接前准备教程",this::preparation,false,false));root.addView(button("使用帮助",this::help,false,false));root.addView(text("v1.3.0 · Android 8+ · 局域网 ADB",11,false));
         try{lans.addAll(AdbCore.Lan.current());networks.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,lans));}catch(Exception e){notice(e.getMessage(),true);}
         updateInstall();
     }
@@ -71,6 +73,14 @@ public class MainActivity extends Activity {
     Button button(String title,Runnable action,boolean primary){return button(title,action,primary,true);}
     Button button(String title,Runnable action,boolean primary,boolean tracked){Button b=new Button(this);b.setText(title);b.setAllCaps(false);b.setTextSize(13);b.setTextColor(primary?Color.WHITE:INK);b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(primary?ORANGE:0xfff5f5f0));b.setOnClickListener(v->action.run());if(tracked)lockable.add(b);return b;}
     void ui(Runnable action){runOnUiThread(()->{if(!isFinishing()&&!isDestroyed())action.run();});}
+    void queueChange(Runnable action)throws Exception{FutureTask<Void> task=new FutureTask<>(()->{if(!isFinishing()&&!isDestroyed())action.run();return null;});runOnUiThread(task);task.get();}
+    void archiveInstalled(List<Apk> completed,AdbCore.Endpoint target)throws Exception{
+        queueChange(()->{for(Apk apk:completed)if(files.remove(apk)){apk.target=target.address();apk.installedAt=System.currentTimeMillis();installedFiles.add(apk);apk.file.delete();}renderFiles();renderInstalled();});
+    }
+    void renderInstalled(){
+        installedViews.removeAllViews();if(installedFiles.isEmpty()){installedViews.addView(text("安装成功的 APK 会自动移到这里。",12,false));return;}
+        for(int i=installedFiles.size()-1;i>=0;i--){Apk apk=installedFiles.get(i);LinearLayout row=vertical();row.setPadding(0,dp(8),0,dp(8));row.addView(text(apk.name,13,true));TextView status=text(String.format(Locale.ROOT,"%.1f MB · 安装成功",apk.size/1048576.0),11,false);status.setTextColor(0xff2e7d32);row.addView(status);row.addView(text("安装到："+apk.target+" · "+new java.text.SimpleDateFormat("MM-dd HH:mm:ss",Locale.ROOT).format(new Date(apk.installedAt)),11,false));installedViews.addView(row);}
+    }
     void notice(String value,boolean error){if(value==null)value="操作失败";final String message=value;ui(()->{banner.setText(message);banner.setTextColor(error?0xffa0471d:MUTED);appendLog(message);});}
     void appendLog(String message){log.append('[').append(new java.text.SimpleDateFormat("HH:mm:ss",Locale.ROOT).format(new Date())).append("] ").append(message).append('\n');if(log.length()>150000)log.delete(0,log.length()-100000);}
     void updateInstall(){install.setEnabled(!busy&&selected!=null&&!files.isEmpty());targetLabel.setText(selected==null?"请先连接设备":"安装到："+selected.address());}
@@ -104,7 +114,7 @@ public class MainActivity extends Activity {
         super.onActivityResult(request,result,data);if(result!=RESULT_OK||data==null)return;
         if(request==EXPORT_LOG){try(OutputStream out=getContentResolver().openOutputStream(data.getData())){if(out==null)throw new IOException("无法导出日志");out.write(log.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));notice("日志已导出。",false);}catch(Exception e){notice(e.getMessage(),true);}return;}
         if(request!=PICK_APK)return;List<Uri> uris=new ArrayList<>();if(data.getClipData()!=null){for(int i=0;i<data.getClipData().getItemCount();i++)uris.add(data.getClipData().getItemAt(i).getUri());}else if(data.getData()!=null)uris.add(data.getData());
-        runWork(()->{for(Uri uri:uris){try{Apk apk=copyApk(uri);files.add(apk);}catch(Exception e){notice(e.getMessage(),true);}}ui(this::renderFiles);});
+        runWork(()->{for(Uri uri:uris){try{Apk apk=copyApk(uri);queueChange(()->files.add(apk));}catch(Exception e){notice(e.getMessage(),true);}}ui(this::renderFiles);});
     }
     Apk copyApk(Uri uri)throws IOException{
         String name="应用.apk";long knownSize=-1;
@@ -122,7 +132,7 @@ public class MainActivity extends Activity {
         }catch(IOException e){destination.delete();throw e;}
     }
     void renderFiles(){
-        fileViews.removeAllViews();for(Apk apk:files){LinearLayout item=vertical();item.setPadding(0,dp(8),0,dp(8));item.addView(text(apk.name,13,true));TextView info=text(String.format(Locale.ROOT,"%.1f MB · %s",apk.file.length()/1048576.0,apk.state),11,false);info.setTextColor(apk.state.equals("安装成功")?0xff2e7d32:apk.state.equals("安装失败")?0xffb3261e:MUTED);item.addView(info);if(!apk.detail.isEmpty())item.addView(text(apk.detail,11,false));fileViews.addView(item);}updateInstall();
+        fileViews.removeAllViews();for(Apk apk:files){LinearLayout item=vertical();item.setPadding(0,dp(8),0,dp(8));item.addView(text(apk.name,13,true));TextView info=text(String.format(Locale.ROOT,"%.1f MB · %s",apk.size/1048576.0,apk.state),11,false);info.setTextColor(apk.state.equals("安装成功")?0xff2e7d32:apk.state.equals("安装失败")?0xffb3261e:MUTED);item.addView(info);if(!apk.detail.isEmpty())item.addView(text(apk.detail,11,false));fileViews.addView(item);}updateInstall();
     }
     void push(AdbCore.Endpoint endpoint,Apk apk,String remote)throws Exception{
         notice("正在传输："+apk.name,false);AdbCore.Connection connection=new AdbCore.Connection(endpoint,keys,message->notice(message,false));active=connection;
@@ -140,13 +150,13 @@ public class MainActivity extends Activity {
                     if(stopRemaining)throw new IOException("拆分安装已取消，未提交安装会话。");Apk apk=snapshot.get(i);apk.state="安装中";ui(this::renderFiles);String path="/data/local/tmp/tv-installer-"+UUID.randomUUID()+".apk";remotePaths.add(path);push(target,apk,path);
                     String written=shell(target,"pm install-write -S "+apk.file.length()+" "+session+" part_"+i+".apk "+path,60000);ui(()->appendLog(written));if(!written.contains("Success"))throw new IOException(written);
                 }
-                if(stopRemaining)throw new IOException("拆分安装已取消，未提交安装会话。");String committed=shell(target,"pm install-commit "+session,600000);ui(()->appendLog(committed));if(!success(committed))throw new IOException(committed);session=null;for(Apk apk:snapshot)apk.state="安装成功";success=1;
+                if(stopRemaining)throw new IOException("拆分安装已取消，未提交安装会话。");String committed=shell(target,"pm install-commit "+session,600000);ui(()->appendLog(committed));if(!success(committed))throw new IOException(committed);session=null;for(Apk apk:snapshot)apk.state="安装成功";success=1;archiveInstalled(snapshot,target);
             }catch(Exception e){failure=1;for(Apk apk:snapshot){apk.state="安装失败";apk.detail=AdbCore.friendly(e.getMessage());}}
             finally{if(session!=null){try{shell(target,"pm install-abandon "+session,15000);}catch(Exception ignored){}}for(String path:remotePaths)cleanup(target,path);ui(this::renderFiles);}
         }else{
             for(Apk apk:snapshot){
                 if(stopRemaining)break;String remote="/data/local/tmp/tv-installer-"+UUID.randomUUID()+".apk";apk.state="安装中";ui(this::renderFiles);
-                try{push(target,apk,remote);notice("设备正在安装："+apk.name,false);String result=shell(target,"pm install -r "+remote,600000);ui(()->appendLog(result));if(!success(result))throw new IOException(result);apk.state="安装成功";success++;}
+                try{push(target,apk,remote);notice("设备正在安装："+apk.name,false);String result=shell(target,"pm install -r "+remote,600000);ui(()->appendLog(result));if(!success(result))throw new IOException(result);apk.state="安装成功";success++;archiveInstalled(Collections.singletonList(apk),target);}
                 catch(Exception e){apk.state="安装失败";apk.detail=AdbCore.friendly(e.getMessage());failure++;}
                 finally{cleanup(target,remote);ui(this::renderFiles);}
             }
