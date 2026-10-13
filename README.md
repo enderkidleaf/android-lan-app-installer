@@ -14,7 +14,7 @@
 
 ## 下载
 
-[v1.2.0 预览版](https://github.com/enderkidleaf/android-lan-app-installer/releases/tag/v1.2.0) 新增内置连接前准备教程，随时可打开查看。仓库名称已统一为 `android-lan-app-installer`，应用标识与安卓签名保持兼容。旧版本下载包仍保留原来的名称。
+源码当前版本为 v1.3.0，新增独立的「已安装」区域。已发布的版本见 [GitHub Releases](https://github.com/enderkidleaf/android-lan-app-installer/releases)。仓库名称已统一为 `android-lan-app-installer`，应用标识与安卓签名保持兼容。旧版本下载包仍保留原来的名称。
 
 在 [GitHub Releases](https://github.com/enderkidleaf/android-lan-app-installer/releases) 选择对应平台的安装包。macOS 包为 `android-lan-app-installer-macOS.zip`；Windows 包为 `android-lan-app-installer-Windows-x64.zip`；安卓为 `android-lan-app-installer-Android.apk`。
 
@@ -44,6 +44,12 @@ Windows 与安卓详细说明分别见 [Windows/README.md](Windows/README.md) �
 
 更新使用 `-r` 保留已有应用数据。工具不自动卸载、不降级、不绕过目标设备安装限制。停止后续安装会等待当前安装结束。
 
+### 待安装与已安装
+
+「添加应用」只保留待安装、失败或已跳过的 APK。每项成功后自动移到下方的「已安装」，显示名称、大小、安装目标和完成时间；安装下一批时不会再次发送此前的成功项。拆分 APK 在整组提交成功后一起移动，整组失败则全部保留以便重试。
+
+「已安装」是本次会话的安装成功记录，不是目标设备的全部应用列表。清空待安装文件不会清除成功记录；「清空记录」只清除显示记录，不会卸载应用或把旧文件重新加入队列。需要再次安装同一 APK 或换设备安装时，可主动重新选择该文件。安卓端成功后释放该 APK 的临时缓存，保留名称、大小和目标等显示信息，原始 APK 不受影响。
+
 ## 查找与连接
 
 - 扫描所选 IPv4 网卡的真实子网，最多扫描本机所在的 /24（不超过 253 个其他地址），仅检测 TCP 5555。
@@ -67,6 +73,7 @@ macOS 应用为本地构建并使用 ad-hoc 签名，未经过 Apple 公证。�
 ```bash
 bash Scripts/build.sh
 bash Scripts/test.sh
+bash Scripts/test-install-queue.sh
 ```
 
 构建脚本在 `Resources/adb` 缺失时从 Google 官方下载 Platform Tools；正式应用内置 ADB，不需要用户另行安装 Python、Node、Homebrew 或 Android Studio。
