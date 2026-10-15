@@ -138,7 +138,11 @@ public final class AdbCore {
         private int remoteId,maxData=4096; private boolean opened;
         private final ArrayDeque<byte[]> pending=new ArrayDeque<>();
         public Connection(Endpoint endpoint,Keys keys,Notice notice)throws IOException,GeneralSecurityException{
+            this(endpoint,keys,notice,connection->{});
+        }
+        public Connection(Endpoint endpoint,Keys keys,Notice notice,java.util.function.Consumer<Connection> started)throws IOException,GeneralSecurityException{
             try{
+                started.accept(this);
                 socket.connect(new InetSocketAddress(endpoint.host,endpoint.port),5000);socket.setTcpNoDelay(true);socket.setSoTimeout(60000);
                 input=socket.getInputStream();output=socket.getOutputStream();
                 Frame.write(output,CNXN,0x01000000,256*1024,"host::\0".getBytes(StandardCharsets.UTF_8));
