@@ -78,6 +78,7 @@ public class AndroidCoreTests {
         check(!DeviceCommands.validPng("error".getBytes(StandardCharsets.UTF_8)),"invalid screenshot rejected");
         final byte[] binary=new byte[]{(byte)137,80,78,71,13,10,26,10,0,0,0,0,0,(byte)255,(byte)128,0,0,0,0,0,0,0,0,0,0};
         server(socket->{handshake(socket);for(int i=0;i<binary.length;i++){AdbCore.Frame.write(socket.getOutputStream(),AdbCore.WRTE,77,1,new byte[]{binary[i]});AdbCore.Frame.read(socket.getInputStream());}AdbCore.Frame.write(socket.getOutputStream(),AdbCore.CLSE,77,1,new byte[0]);},endpoint->{try(AdbCore.Connection c=new AdbCore.Connection(endpoint,keys,m->{})){c.open("exec:screencap -p");byte[] bytes=c.readAll(32*1024*1024);check(Arrays.equals(binary,bytes)&&DeviceCommands.validPng(bytes),"screenshot binary survives fragmented transport without UTF8 conversion");}});
+        AndroidTroubleshootingTests.run(keys);
         System.out.println("PASS: "+checks.get()+" Android protocol checks");
     }
 }

@@ -45,4 +45,5 @@ try
     }
 }
 finally { Directory.Delete(directory,true); }
+await WindowsTroubleshootingTests.Run(Check,Reject);
 Console.WriteLine($"PASS: {checks} Windows core checks");
