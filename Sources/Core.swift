@@ -110,7 +110,34 @@ struct CommandResult {
     let code: Int32
     let output: String
     let timedOut: Bool
-    var success: Bool { code == 0 && !timedOut }
+    var cancelled = false
+    var outputLimited = false
+    var success: Bool { code == 0 && !timedOut && !cancelled && !outputLimited }
+}
+
+final class CommandControl: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stopped = false
+    private var process: Process?
+    var cancelled: Bool { lock.lock(); defer { lock.unlock() }; return stopped }
+    func attach(_ process: Process) { lock.lock(); self.process = process; let cancel = stopped; lock.unlock(); if cancel && process.isRunning { process.terminate() } }
+    func detach() { lock.lock(); process = nil; lock.unlock() }
+    func cancel() { lock.lock(); stopped = true; let running = process; lock.unlock(); if let running, running.isRunning { running.terminate() } }
+}
+
+enum TerminalCodec {
+    static func validate(_ command: String) throws -> String {
+        guard !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, command.utf8.count <= 8192, !command.contains("\0") else { throw ToolError.message("请输入一条命令，最多 8192 字节，不能包含空字符。") }
+        return command
+    }
+    static func wrap(_ command: String, marker: String) throws -> String {
+        "(\n" + (try validate(command)) + "\n); result=$?; printf '\\n" + marker + ":%s\\n' \"$result\""
+    }
+    static func parse(_ output: String, marker: String) -> (String, Int?) {
+        guard let range = output.range(of: "\n" + marker + ":", options: .backwards),
+              let code = Int(output[range.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)) else { return (output, nil) }
+        return (String(output[..<range.lowerBound]), code)
+    }
 }
 
 enum DeviceCommands {
@@ -169,7 +196,9 @@ struct ADBClient {
         return data
     }
 
-    func run(_ arguments: [String], timeout: TimeInterval = 15, input: String? = nil) throws -> CommandResult {
+    func run(_ arguments: [String], timeout: TimeInterval = 15, input: String? = nil,
+             control: CommandControl? = nil, outputLimit: Int? = nil, onOutput: ((String) -> Void)? = nil) throws -> CommandResult {
+        if control?.cancelled == true { return CommandResult(code: -1, output: "", timedOut: false, cancelled: true) }
         let process = Process()
         process.executableURL = executable
         process.arguments = arguments
@@ -185,20 +214,41 @@ struct ADBClient {
         let finished = DispatchSemaphore(value: 0)
         process.terminationHandler = { _ in finished.signal() }
         try process.run()
+        control?.attach(process)
+        defer { control?.detach() }
         if let input { try stdin.fileHandleForWriting.write(contentsOf: Data((input + "\n").utf8)) }
         try? stdin.fileHandleForWriting.close()
-        let timedOut = finished.wait(timeout: .now() + timeout) == .timedOut
-        if timedOut {
+        let deadline = Date().addingTimeInterval(timeout)
+        var timedOut = false, cancelled = false, limited = false
+        var previousSize: UInt64 = 0
+        while true {
+            let ended = finished.wait(timeout: .now() + 0.1) == .success
+            let size = ((try? FileManager.default.attributesOfItem(atPath: outputURL.path)[.size]) as? NSNumber)?.uint64Value ?? 0
+            if size != previousSize, let onOutput {
+                let reader = try FileHandle(forReadingFrom: outputURL)
+                let snapshot = try outputLimit.map { try reader.read(upToCount: $0) ?? Data() } ?? (try reader.readToEnd() ?? Data())
+                try? reader.close()
+                onOutput(String(decoding: snapshot, as: UTF8.self))
+                previousSize = size
+            }
+            limited = outputLimit.map { size > UInt64($0) } ?? false
+            cancelled = control?.cancelled == true
+            timedOut = !ended && Date() >= deadline
+            if ended || limited || cancelled || timedOut { break }
+        }
+        if process.isRunning && (timedOut || cancelled || limited) {
             process.terminate()
             if finished.wait(timeout: .now() + 2) == .timedOut {
                 kill(process.processIdentifier, SIGKILL)
                 _ = finished.wait(timeout: .now() + 2)
             }
         }
-        let data = (try? Data(contentsOf: outputURL)) ?? Data()
+        let reader = try FileHandle(forReadingFrom: outputURL)
+        defer { try? reader.close() }
+        let data = try outputLimit.map { try reader.read(upToCount: $0) ?? Data() } ?? (try reader.readToEnd() ?? Data())
         let text = String(decoding: data, as: UTF8.self)
         return CommandResult(code: process.isRunning ? -1 : process.terminationStatus,
-                             output: text + (timedOut ? "\n连接或操作超时 (timed out)。" : ""), timedOut: timedOut)
+                             output: text + (timedOut ? "\n连接或操作超时 (timed out)。" : ""), timedOut: timedOut, cancelled: cancelled, outputLimited: limited)
     }
 
     func enrichedDevices() throws -> [Device] {
@@ -267,27 +317,48 @@ struct LAN: Identifiable, Equatable {
 }
 
 enum PortProbe {
+    enum Status: Equatable {
+        case open, refused, timeout, unreachable, permission, other(Int32)
+        var description: String {
+            switch self {
+            case .open: return "TCP 端口可访问。"
+            case .refused: return "端口拒绝连接：请检查目标设备的网络 ADB 开关和端口。"
+            case .timeout: return "连接端口超时：请检查设备是否开机、IP 是否正确，以及网络隔离或防火墙。"
+            case .unreachable: return "端口探测无法到达目标：请检查局域网与 IP；macOS 本地网络权限也可能阻止此访问。"
+            case .permission: return "本机拒绝访问局域网：请检查 macOS 隐私与安全性中的本地网络权限。"
+            case .other(let code): return "端口检查失败：系统错误 \(code)。"
+            }
+        }
+    }
+    static func status(_ error: Int32) -> Status {
+        switch error { case ECONNREFUSED: return .refused; case ETIMEDOUT: return .timeout; case EHOSTUNREACH, ENETUNREACH, EHOSTDOWN, ENETDOWN: return .unreachable; case EPERM, EACCES: return .permission; default: return .other(error) }
+    }
     static func open(_ host: String, port: Int = 5555, timeoutMS: Int32 = 650) -> Bool {
+        inspect(host, port: port, timeoutMS: timeoutMS) == .open
+    }
+    static func inspect(_ host: String, port: Int = 5555, timeoutMS: Int32 = 650) -> Status {
         let fd = socket(AF_INET, SOCK_STREAM, 0)
-        guard fd >= 0 else { return false }
+        guard fd >= 0 else { return status(errno) }
         defer { close(fd) }
         let flags = fcntl(fd, F_GETFL, 0)
-        guard flags >= 0, fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0 else { return false }
+        guard flags >= 0, fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0 else { return status(errno) }
         var addr = sockaddr_in()
         addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
         addr.sin_family = sa_family_t(AF_INET)
         addr.sin_port = UInt16(port).bigEndian
-        guard inet_pton(AF_INET, host, &addr.sin_addr) == 1 else { return false }
+        guard inet_pton(AF_INET, host, &addr.sin_addr) == 1 else { return .other(EINVAL) }
         let result = withUnsafePointer(to: &addr) { pointer in
             pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
         }
-        if result == 0 { return true }
-        guard errno == EINPROGRESS else { return false }
+        if result == 0 { return .open }
+        guard errno == EINPROGRESS else { return status(errno) }
         var pollFD = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
-        guard poll(&pollFD, 1, timeoutMS) > 0 else { return false }
+        let polled = poll(&pollFD, 1, timeoutMS)
+        guard polled > 0 else { return polled == 0 ? .timeout : status(errno) }
         var error: Int32 = 0
         var length = socklen_t(MemoryLayout<Int32>.size)
-        return getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &length) == 0 && error == 0
+        guard getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &length) == 0 else { return status(errno) }
+        return error == 0 ? .open : status(error)
     }
 
     static func scan(_ lan: LAN, progress: @escaping (Int, Int) -> Void) -> [String] {

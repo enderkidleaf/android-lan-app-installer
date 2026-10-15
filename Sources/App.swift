@@ -170,7 +170,7 @@ final class InstallerModel: ObservableObject {
                 updateDevices(value)
                 if value.contains(where: \.ready) { notice("发现 \(value.filter(\.ready).count) 台已连接设备。请确认型号并选择安装目标。") }
                 else if !value.isEmpty { notice("已发现 ADB 设备，请在设备上允许调试，再刷新状态。", error: true) }
-                else { notice(count == 0 ? "未发现网络 ADB。可输入设备 IP 重试，或在设备的无线调试页面查看端口并配对。" : "发现开放的端口，但尚未连接成功。请检查设备授权和无线调试设置。", error: true) }
+                else { notice(count == 0 ? "未发现网络 ADB。可输入设备 IP 重试，或在设备的无线调试页面查看端口并配对。" : "发现开放的端口，但连接失败。可打开「诊断与终端」检查授权和本机 ADB 服务。", error: true) }
             case .failure(let error): notice(error.localizedDescription, error: true)
             }
             busy = false; progress = 1; phase = "发现完成"
@@ -356,6 +356,7 @@ struct InstallerView: View {
     @State var showPreparation = false
     @State var toolsTarget: Device?
     @State var toolsSection = 0
+    @State var showTroubleshooting = false
     var body: some View {
         HStack(spacing: 0) {
             sidebar
@@ -382,6 +383,10 @@ struct InstallerView: View {
         .sheet(isPresented: $showHelp) { helpSheet }
         .sheet(isPresented: $showPreparation) { PreparationGuideView() }
         .sheet(item: $toolsTarget) { target in DeviceToolsView(target: target, client: model.client, section: toolsSection) }
+        .sheet(isPresented: $showTroubleshooting, onDismiss: { model.refresh() }) {
+            TroubleshootingView(client: model.client, address: model.selected?.serial ?? model.address,
+                                initialOutput: model.logs.map { "[\($0.date.formatted())] \($0.text)" }.joined(separator: "\n"))
+        }
         .onOpenURL { model.addFiles([$0]) }
         .onAppear { model.refresh() }
     }
@@ -408,6 +413,8 @@ struct InstallerView: View {
                 }
                 Button { model.showLogs = true } label: { Label("操作日志", systemImage: "text.alignleft").padding(.horizontal, 13) }
                     .buttonStyle(.plain).font(.system(size: 13)).foregroundStyle(muted)
+                Button { showTroubleshooting = true } label: { Label("诊断与终端", systemImage: "terminal").padding(.horizontal, 13) }
+                    .buttonStyle(.plain).font(.system(size: 13)).foregroundStyle(muted).disabled(model.busy)
             }
             Spacer()
             VStack(alignment: .leading, spacing: 14) {
@@ -422,7 +429,7 @@ struct InstallerView: View {
                 }
                 Text(model.network?.ip ?? "检查 Wi-Fi / 以太网").font(.system(size: 11, design: .monospaced)).foregroundStyle(muted)
             }
-            Text("v1.4.0 · macOS").font(.system(size: 10)).foregroundStyle(muted.opacity(0.75))
+            Text("v1.5.0 · macOS").font(.system(size: 10)).foregroundStyle(muted.opacity(0.75))
         }.padding(24).frame(width: 220).background(Color.white)
             .overlay(alignment: .trailing) { Rectangle().fill(ink.opacity(0.06)).frame(width: 1) }
     }
@@ -456,6 +463,7 @@ struct InstallerView: View {
                     Spacer()
                     Button { model.refresh() } label: { Label("刷新状态", systemImage: "arrow.clockwise") }
                         .disabled(model.busy).buttonStyle(.borderless).font(.system(size: 11))
+                    Button("诊断与终端") { showTroubleshooting = true }.disabled(model.busy).buttonStyle(.borderless).font(.system(size: 11))
                 }
                 HStack(spacing: 10) {
                     Picker("网络", selection: $model.networkID) {
@@ -726,6 +734,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
     func applicationDidFinishLaunching(_ notification: Notification) { NSApp.activate(ignoringOtherApps: true) }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        AppState.troubleshooting?.stop()
         if let model = AppState.model, model.installing {
             let alert = NSAlert()
             alert.messageText = "安装仍在进行"
@@ -738,7 +747,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-enum AppState { @MainActor static weak var model: InstallerModel? }
+enum AppState { @MainActor static weak var model: InstallerModel?; @MainActor static weak var troubleshooting: TroubleshootingModel? }
 
 #if !QUEUE_TESTING
 @main
