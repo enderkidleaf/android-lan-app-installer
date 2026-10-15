@@ -46,6 +46,7 @@ public class MainActivity extends Activity {
         LinearLayout connectRow=horizontal();connectRow.addView(button("连接",()->{try{AdbCore.Endpoint endpoint=AdbCore.Endpoint.parse(address.getText().toString());runWork(()->connect(endpoint));}catch(Exception e){notice(e.getMessage(),true);}},false),weight());
         connectRow.addView(button("断开",()->{selected=null;deviceViews.removeAllViews();targetLabel.setText("请先连接设备");notice("已清除所选连接。设备端 ADB 调试需在设备设置中关闭。",false);updateInstall();},false),weight());connection.addView(connectRow);
         connection.addView(text("安卓端支持普通 TCP 网络 ADB。配对式 TLS 无线调试请使用桌面客户端。",11,false));
+        connection.addView(button("设备应用 · 遥控器 · 截图",()->{if(selected==null){notice("请先连接设备。",true);return;}Intent intent=new Intent(this,DeviceToolsActivity.class);intent.putExtra("target",selected.address());startActivity(intent);},false));
         space(root,16);LinearLayout apk=card();root.addView(apk);apk.addView(text("02  添加应用",18,true));apk.addView(text("APK 从手机直接传到所选设备，不上传云端。",12,false));
         apk.addView(button("选择 APK 文件",this::chooseFiles,true));
         fileViews=vertical();apk.addView(fileViews);
@@ -58,7 +59,7 @@ public class MainActivity extends Activity {
         space(root,16);LinearLayout history=card();root.addView(history);history.addView(text("03  已安装",18,true));history.addView(text("本次会话的成功记录，不会参与后续安装。",12,false));
         installedViews=vertical();history.addView(installedViews);history.addView(button("清空记录",()->{installedFiles.clear();renderInstalled();},false,false));renderInstalled();
         space(root,16);banner=text("准备就绪：先发现设备或输入 IP 连接。",13,false);banner.setPadding(dp(14),dp(12),dp(14),dp(12));banner.setBackground(round(0xffeeeeE8,10));root.addView(banner);
-        root.addView(button("连接前准备教程",this::preparation,false,false));root.addView(button("使用帮助",this::help,false,false));root.addView(text("v1.3.0 · Android 8+ · 局域网 ADB",11,false));
+        root.addView(button("连接前准备教程",this::preparation,false,false));root.addView(button("使用帮助",this::help,false,false));root.addView(text("v1.4.0 · Android 8+ · 局域网 ADB",11,false));
         try{lans.addAll(AdbCore.Lan.current());networks.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,lans));}catch(Exception e){notice(e.getMessage(),true);}
         updateInstall();
     }
