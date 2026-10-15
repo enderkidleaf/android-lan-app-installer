@@ -354,6 +354,8 @@ struct InstallerView: View {
     @EnvironmentObject var model: InstallerModel
     @State var showHelp = false
     @State var showPreparation = false
+    @State var toolsTarget: Device?
+    @State var toolsSection = 0
     var body: some View {
         HStack(spacing: 0) {
             sidebar
@@ -379,6 +381,7 @@ struct InstallerView: View {
         .sheet(isPresented: $model.showLogs) { logSheet }
         .sheet(isPresented: $showHelp) { helpSheet }
         .sheet(isPresented: $showPreparation) { PreparationGuideView() }
+        .sheet(item: $toolsTarget) { target in DeviceToolsView(target: target, client: model.client, section: toolsSection) }
         .onOpenURL { model.addFiles([$0]) }
         .onAppear { model.refresh() }
     }
@@ -399,6 +402,10 @@ struct InstallerView: View {
                     .background(accent.opacity(0.08)).clipShape(RoundedRectangle(cornerRadius: 10))
                 Button { showPreparation = true } label: { Label("连接前准备教程", systemImage: "book.closed").padding(.horizontal, 13) }
                     .buttonStyle(.plain).font(.system(size: 13)).foregroundStyle(muted)
+                ForEach(Array([("设备应用", "apps.iphone"), ("虚拟遥控器", "dpad"), ("一键截图", "camera")].enumerated()), id: \.offset) { index, item in
+                    Button { toolsSection = index; toolsTarget = model.selected } label: { Label(item.0, systemImage: item.1).padding(.horizontal, 13) }
+                        .buttonStyle(.plain).font(.system(size: 13)).foregroundStyle(muted).disabled(model.busy || model.selected?.ready != true)
+                }
                 Button { model.showLogs = true } label: { Label("操作日志", systemImage: "text.alignleft").padding(.horizontal, 13) }
                     .buttonStyle(.plain).font(.system(size: 13)).foregroundStyle(muted)
             }
@@ -415,7 +422,7 @@ struct InstallerView: View {
                 }
                 Text(model.network?.ip ?? "检查 Wi-Fi / 以太网").font(.system(size: 11, design: .monospaced)).foregroundStyle(muted)
             }
-            Text("v1.3.0 · macOS").font(.system(size: 10)).foregroundStyle(muted.opacity(0.75))
+            Text("v1.4.0 · macOS").font(.system(size: 10)).foregroundStyle(muted.opacity(0.75))
         }.padding(24).frame(width: 220).background(Color.white)
             .overlay(alignment: .trailing) { Rectangle().fill(ink.opacity(0.06)).frame(width: 1) }
     }

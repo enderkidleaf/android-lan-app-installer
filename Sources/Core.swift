@@ -113,9 +113,61 @@ struct CommandResult {
     var success: Bool { code == 0 && !timedOut }
 }
 
+enum DeviceCommands {
+    static func package(_ value: String) throws -> String {
+        guard value.range(of: "\\A[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)+\\z", options: .regularExpression) != nil else { throw ToolError.message("设备返回了无效的应用包名。") }
+        return value
+    }
+    static func packages(_ output: String) -> [String] {
+        Array(Set(output.components(separatedBy: .newlines).compactMap { line in
+            let text = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard text.hasPrefix("package:") else { return nil }
+            return try? package(String(text.dropFirst(8)))
+        })).sorted()
+    }
+    static func component(_ output: String) -> String? {
+        output.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.first {
+            $0.range(of: "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)+/[A-Za-z0-9_.$]+$", options: .regularExpression) != nil
+        }
+    }
+    static let keys: [(String, String)] = [("上", "KEYCODE_DPAD_UP"), ("左", "KEYCODE_DPAD_LEFT"), ("确认", "KEYCODE_DPAD_CENTER"), ("右", "KEYCODE_DPAD_RIGHT"), ("下", "KEYCODE_DPAD_DOWN"), ("返回", "KEYCODE_BACK"), ("主页", "KEYCODE_HOME"), ("音量 −", "KEYCODE_VOLUME_DOWN"), ("音量 +", "KEYCODE_VOLUME_UP")]
+    static func key(_ code: String) throws -> String {
+        guard keys.contains(where: { $0.1 == code }) else { throw ToolError.message("不支持的遥控按键。") }
+        return "input keyevent " + code
+    }
+    // A marker preserves the device command's exit status even on legacy shell transports.
+    static func wrapped(_ command: String) -> String { command + "; result=$?; printf '\\n__TOOLS_EXIT:%s\\n' \"$result\"" }
+    static func checked(_ output: String) throws -> String {
+        guard let range = output.range(of: "\n__TOOLS_EXIT:", options: .backwards), output[range.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines) == "0" else { throw ToolError.message(output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "设备没有确认操作成功。" : output) }
+        let text = String(output[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.components(separatedBy: .newlines).contains(where: { $0.hasPrefix("Error:") || $0.hasPrefix("Exception") || $0.hasPrefix("Failure") }) { throw ToolError.message(text) }
+        return text
+    }
+    static func validPNG(_ data: Data) -> Bool { data.count > 24 && data.starts(with: [137,80,78,71,13,10,26,10]) }
+}
+
 /// Run without a shell: IP, pairing code and filenames are always separate arguments.
 struct ADBClient {
     let executable: URL
+
+    func toolShell(_ serial: String, _ command: String) throws -> String {
+        let result = try run(["-s", serial, "shell", DeviceCommands.wrapped(command)], timeout: 30)
+        guard result.success else { throw ToolError.message(ADBParser.friendlyError(result.output)) }
+        return try DeviceCommands.checked(result.output)
+    }
+    func screenshot(_ serial: String) throws -> Data {
+        let remote = "/data/local/tmp/android-lan-screen-\(UUID().uuidString).png"
+        let local = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".png")
+        defer { _ = try? toolShell(serial, "rm -f " + remote); try? FileManager.default.removeItem(at: local) }
+        _ = try toolShell(serial, "screencap -p " + remote)
+        let result = try run(["-s", serial, "pull", remote, local.path], timeout: 30)
+        guard result.success else { throw ToolError.message(ADBParser.friendlyError(result.output)) }
+        let size = (try local.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        guard size <= 32 * 1024 * 1024 else { throw ToolError.message("截图超过 32 MB。") }
+        let data = try Data(contentsOf: local)
+        guard DeviceCommands.validPNG(data) else { throw ToolError.message("设备没有返回有效截图，可能不支持截屏。") }
+        return data
+    }
 
     func run(_ arguments: [String], timeout: TimeInterval = 15, input: String? = nil) throws -> CommandResult {
         let process = Process()
