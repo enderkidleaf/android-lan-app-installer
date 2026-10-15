@@ -75,6 +75,19 @@ import Foundation
         let timeout = try client.run([], timeout: 0.15)
         check(timeout.timedOut && !timeout.success && Date().timeIntervalSince(started) < 4, "bounded subprocess timeout")
         check(timeout.output.contains("timed out"), "timeout diagnostic")
+
+        check(DeviceCommands.packages("package:com.example.b\npackage:com.example.a\npackage:com.example.a\npackage:com.bad;rm -rf /\nwarning")==["com.example.a","com.example.b"], "package inventory rejects injection and deduplicates")
+        for bad in ["com.x;reboot", "com.x$(id)", "com.x\nreboot", "../foo", "com.x'"] { rejects({ _ = try DeviceCommands.package(bad) }, "reject package injection") }
+        check(DeviceCommands.component("priority=0\ncom.example/.Main$Nested\n") == "com.example/.Main$Nested", "resolve valid component")
+        check(DeviceCommands.component("com.example/.Main;reboot") == nil, "reject component injection")
+        let checked = try DeviceCommands.checked("Success\n\n__TOOLS_EXIT:0\n")
+        check(checked == "Success", "remote exit marker")
+        for bad in ["Success", "Failure [DELETE_FAILED_INTERNAL_ERROR]\n__TOOLS_EXIT:0\n", "Error: denied\n__TOOLS_EXIT:0\n", "denied\n__TOOLS_EXIT:1\n"] { rejects({ _ = try DeviceCommands.checked(bad) }, "reject remote failure") }
+        rejects({ _ = try DeviceCommands.key("KEYCODE_HOME;reboot") }, "reject arbitrary input")
+        check(!DeviceCommands.validPNG(Data("error".utf8)), "reject invalid screenshot")
+        try "#!/bin/sh\n[ \\\"$1\\\" = \\\"-s\\\" ] && [ \\\"$2\\\" = \\\"192.168.1.73:5555\\\" ] || exit 9\nprintf 'package:com.example.app\\n\\n__TOOLS_EXIT:0\\n'\n".replacingOccurrences(of: "\\\"", with: "\"").write(to: fake, atomically: true, encoding: .utf8)
+        let inventory = try client.toolShell("192.168.1.73:5555", "pm list packages -3 --user current")
+        check(DeviceCommands.packages(inventory)==["com.example.app"], "tool command pins exact target")
         print("PASS: \(checks) checks")
     }
 }
