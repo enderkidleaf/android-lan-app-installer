@@ -21,7 +21,7 @@ PY
 "$TASK_TOOLS/aapt2" compile --dir "$TASK_ROOT/Android/app/src/main/res" -o "$TASK_BUILD/resources.zip"
 "$TASK_TOOLS/aapt2" link -o "$TASK_BUILD/unsigned.apk" -I "$TASK_PLATFORM" \
     --manifest "$TASK_BUILD/AndroidManifest.xml" --java "$TASK_BUILD/generated" \
-    --min-sdk-version 26 --target-sdk-version 36 --version-code 140 --version-name 1.4.0 \
+    --min-sdk-version 26 --target-sdk-version 36 --version-code 150 --version-name 1.5.0 \
     "$TASK_BUILD/resources.zip"
 python3 - "$TASK_ROOT" <<'PY'
 import pathlib,sys
