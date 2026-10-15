@@ -7,6 +7,7 @@ if [ -x "$TASK_ROOT/.build/toolchains/dotnet/dotnet" ]; then TASK_DOTNET="$TASK_
 mkdir -p "$TASK_ROOT/.build/java-tests"
 "$TASK_JAVA/bin/javac" -encoding UTF-8 -d "$TASK_ROOT/.build/java-tests" \
     "$TASK_ROOT/Android/app/src/main/java/com/enderkidleaf/tvinstaller/AdbCore.java" \
+    "$TASK_ROOT/Android/app/src/main/java/com/enderkidleaf/tvinstaller/DeviceCommands.java" \
     "$TASK_ROOT/CrossPlatformTests/AndroidCoreTests.java" "$TASK_ROOT/CrossPlatformTests/AndroidTvSmoke.java"
 "$TASK_JAVA/bin/java" -cp "$TASK_ROOT/.build/java-tests" com.enderkidleaf.tvinstaller.AndroidCoreTests
 export DOTNET_CLI_HOME="$TASK_ROOT/.build/dotnet-home"
