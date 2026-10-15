@@ -14,7 +14,7 @@
 
 ## 下载
 
-源码当前版本为 v1.4.0，新增设备应用管理、虚拟遥控器和截图。已发布的版本见 [GitHub Releases](https://github.com/enderkidleaf/android-lan-app-installer/releases)。仓库名称已统一为 `android-lan-app-installer`，应用标识与安卓签名保持兼容。旧版本下载包仍保留原来的名称。
+源码当前版本为 v1.5.0，新增连接诊断、服务修复和 ADB 终端。已发布的版本见 [GitHub Releases](https://github.com/enderkidleaf/android-lan-app-installer/releases)。仓库名称已统一为 `android-lan-app-installer`，应用标识与安卓签名保持兼容。旧版本下载包仍保留原来的名称。
 
 在 [GitHub Releases](https://github.com/enderkidleaf/android-lan-app-installer/releases) 选择对应平台的安装包。macOS 包为 `android-lan-app-installer-macOS.zip`；Windows 包为 `android-lan-app-installer-Windows-x64.zip`；安卓为 `android-lan-app-installer-Android.apk`。
 
@@ -60,6 +60,18 @@ Windows 与安卓详细说明分别见 [Windows/README.md](Windows/README.md) �
 
 设备应用列表与「已安装」会话记录各自独立；管理设备应用不会把旧 APK 放回安装队列。应用和截图仅经本地网络传输，无云端上传。此版本不包含文件管理、录屏或实时投屏。
 
+## 连接诊断与 ADB 终端
+
+未连接设备时也可打开：macOS 侧栏或设备卡片「诊断与终端」，Windows 设备区域「诊断与终端」，安卓设备区域「连接诊断与 ADB 终端」。输入目标设备的 IPv4 地址与端口后操作；桌面终端也支持已连接的 `adb-…` 无线设备序列号。检查连接会尝试连接并执行只读的通道检查，可能出现首次调试授权提示。
+
+- **检查连接**：显示 TCP 端口检查、设备列表、连接响应与设备命令通道结果；区分端口拒绝、网络不可达、超时、本机权限和设备授权问题。诊断会保留原始输出，不将“端口开放”等同于“ADB 已连接”。
+- **修复连接（桌面）**：先重新诊断，连接正常或等待设备授权时不重启服务。仅在端口可达、命令通道失败，且未发现其他 ADB 设备时尝试重启本机服务并重新检查。紧邻重启前再次检查完整设备列表，包括 USB、模拟器、离线及未知状态；读取状态失败或出现其他设备时跳过重启。不会清除调试密钥或更改目标设备设置；其他程序仍可同时改变共享 ADB 状态。
+- **重新连接（安卓）**：安卓客户端直接与目标设备通信，不存在电脑端的共享 ADB 服务；通过新建连接重新握手，并检查设备授权与命令通道，不进行全局服务重启。
+- **ADB 终端**：固定显示当前目标，在该设备的 shell 执行单次命令。支持型号、存储空间、最近系统日志等常用命令；桌面另有本机设备列表和后台服务状态，安卓可查看本机网络。自定义命令可能修改设备数据，请确认目标与内容。该终端不支持交互式输入、文件上传或本机系统任意命令。
+- **输出与停止**：命令输出实时显示，显示远端退出码；缺少退出标记时显示“未返回”。最长 60 秒、单次最多显示 256 KB，达到上限或点击停止后关闭本次命令进程／连接，并保留已收到的输出。设备上自行启动的后台任务可能继续运行。支持选择、复制、清空和导出文本记录；默认仅保存在当前窗口内存，只有主动导出才写入用户选择的位置。日志可能包含设备或应用信息，导出后请自行确认分享范围。
+
+这些入口不会自动执行自定义命令。常规连接与安装流程也不会自动重启共享服务；需要时由用户点击「修复连接」。
+
 ## 查找与连接
 
 - 扫描所选 IPv4 网卡的真实子网，最多扫描本机所在的 /24（不超过 253 个其他地址），仅检测 TCP 5555。
@@ -85,6 +97,7 @@ bash Scripts/build.sh
 bash Scripts/test.sh
 bash Scripts/test-install-queue.sh
 bash Scripts/test-device-tools.sh
+bash Scripts/test-troubleshooting.sh
 ```
 
 构建脚本在 `Resources/adb` 缺失时从 Google 官方下载 Platform Tools；正式应用内置 ADB，不需要用户另行安装 Python、Node、Homebrew 或 Android Studio。
