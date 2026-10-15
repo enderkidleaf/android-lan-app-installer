@@ -67,6 +67,17 @@ public class AndroidCoreTests {
         },endpoint->{try(AdbCore.Connection connection=new AdbCore.Connection(endpoint,keys,m->{})){connection.push(new ByteArrayInputStream(file),file.length,"/data/local/tmp/test.bin",(done,total)->{});check(true,"sync upload success");}});
         server(socket->{AdbCore.Frame.read(socket.getInputStream());AdbCore.Frame.write(socket.getOutputStream(),AdbCore.STLS,1,1,new byte[0]);},endpoint->reject(()->new AdbCore.Connection(endpoint,keys,m->{})));
         check(AdbCore.friendly("INSTALL_FAILED_UPDATE_INCOMPATIBLE").contains("签名"),"explain signature failure");
+
+        check(DeviceCommands.packages("package:com.example.b\npackage:com.example.a\npackage:com.example.a\npackage:com.bad;reboot").equals(Arrays.asList("com.example.a","com.example.b")),"clean package inventory");
+        for(String bad:new String[]{"com.x;reboot","com.x$(id)","com.x\nreboot","../foo","com.x'"})reject(()->DeviceCommands.pkg(bad));
+        check(DeviceCommands.component("priority=0\ncom.example/.Main$Nested\n").equals("com.example/.Main$Nested"),"component parsing");
+        check(DeviceCommands.component("com.example/.Main;reboot")==null,"component injection rejection");
+        check(DeviceCommands.checked("Success\n\n__TOOLS_EXIT:0\n").equals("Success"),"remote exit marker");
+        for(String bad:new String[]{"Success","Failure [DENIED]\n__TOOLS_EXIT:0\n","Error: denied\n__TOOLS_EXIT:0\n","denied\n__TOOLS_EXIT:1\n"})reject(()->DeviceCommands.checked(bad));
+        reject(()->DeviceCommands.key("KEYCODE_HOME;reboot"));
+        check(!DeviceCommands.validPng("error".getBytes(StandardCharsets.UTF_8)),"invalid screenshot rejected");
+        final byte[] binary=new byte[]{(byte)137,80,78,71,13,10,26,10,0,0,0,0,0,(byte)255,(byte)128,0,0,0,0,0,0,0,0,0,0};
+        server(socket->{handshake(socket);for(int i=0;i<binary.length;i++){AdbCore.Frame.write(socket.getOutputStream(),AdbCore.WRTE,77,1,new byte[]{binary[i]});AdbCore.Frame.read(socket.getInputStream());}AdbCore.Frame.write(socket.getOutputStream(),AdbCore.CLSE,77,1,new byte[0]);},endpoint->{try(AdbCore.Connection c=new AdbCore.Connection(endpoint,keys,m->{})){c.open("exec:screencap -p");byte[] bytes=c.readAll(32*1024*1024);check(Arrays.equals(binary,bytes)&&DeviceCommands.validPng(bytes),"screenshot binary survives fragmented transport without UTF8 conversion");}});
         System.out.println("PASS: "+checks.get()+" Android protocol checks");
     }
 }

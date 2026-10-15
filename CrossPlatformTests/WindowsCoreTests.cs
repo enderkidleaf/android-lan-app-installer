@@ -17,6 +17,15 @@ Check(new Lan("LAN", "10.3.4.5", 0xffff0000).Hosts().Length == 253, "bound large
 Check(new Lan("LAN", "10.3.4.5", 0xffffffff).Hosts().Length == 0, "/32 boundary");
 Check(Errors.Friendly("INSTALL_FAILED_UPDATE_INCOMPATIBLE").Contains("签名"), "signature failure");
 Check(Errors.Friendly("INSTALL_FAILED_MISSING_SPLIT").Contains("拆分"), "missing split failure");
+
+Check(DeviceCommands.Packages("package:com.example.b\npackage:com.example.a\npackage:com.example.a\npackage:com.bad;reboot").SequenceEqual(new[]{"com.example.a","com.example.b"}),"clean package inventory");
+foreach(string bad in new[]{"com.x;reboot","com.x$(id)","com.x\nreboot","../foo","com.x'"})Reject(()=>DeviceCommands.Package(bad));
+Check(DeviceCommands.Component("priority=0\ncom.example/.Main$Nested\n")=="com.example/.Main$Nested","component parsing");
+Check(DeviceCommands.Component("com.example/.Main;reboot")==null,"component injection rejection");
+Check(DeviceCommands.Checked("Success\n\n__TOOLS_EXIT:0\n")=="Success","remote exit marker");
+foreach(string bad in new[]{"Success","Failure [DENIED]\n__TOOLS_EXIT:0\n","Error: denied\n__TOOLS_EXIT:0\n","denied\n__TOOLS_EXIT:1\n"})Reject(()=>DeviceCommands.Checked(bad));
+Reject(()=>DeviceCommands.Key("KEYCODE_HOME;reboot"));
+Check(!DeviceCommands.ValidPng(Encoding.UTF8.GetBytes("error")),"invalid screenshot rejected");
 string directory = Path.Combine(Path.GetTempPath(), "tv-installer-tests-" + Guid.NewGuid()); Directory.CreateDirectory(directory);
 try
 {
