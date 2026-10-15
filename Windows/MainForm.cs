@@ -39,7 +39,7 @@ public class MainForm : Form
 
         var connection = Card(5);
         root.Controls.Add(connection, 0, 1);
-        connection.Controls.Add(Row(new Label { Text = "01  选择设备   ·   设备开启网络 ADB，与电脑接入同一局域网", AutoSize = true, Font = new Font(Font, FontStyle.Bold) }, Button("准备教程", Preparation, tracked: false)), 0, 0);
+        connection.Controls.Add(Row(new Label { Text = "01  选择设备   ·   设备开启网络 ADB，与电脑接入同一局域网", AutoSize = true, Font = new Font(Font, FontStyle.Bold) }, Button("准备教程", Preparation, tracked: false), Button("诊断与终端", Troubleshoot)), 0, 0);
         var networkLine = Row(networks, Button("发现设备", Discover, true), Button("刷新状态", RefreshDevices));
         connection.Controls.Add(networkLine, 0, 1);
         connection.Controls.Add(devices, 0, 2);
@@ -74,7 +74,7 @@ public class MainForm : Form
         var logCard = Card(2); logCard.RowStyles.Clear(); logCard.RowStyles.Add(new RowStyle(SizeType.Absolute, 32)); logCard.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         logCard.Controls.Add(Row(new Label { Text = "操作日志", AutoSize = true, Font = new Font(Font, FontStyle.Bold) }, Button("导出日志", Export, tracked: false), Button("准备教程", Preparation, tracked: false), Button("使用帮助", Help, tracked: false)), 0, 0);
         logCard.Controls.Add(logs, 0, 1); root.Controls.Add(logCard, 0, 5);
-        root.Controls.Add(new Label { Text = "v1.4.0  ·  官方 ADB  ·  Windows 10 / 11", ForeColor = Color.DimGray, AutoSize = true }, 0, 6);
+        root.Controls.Add(new Label { Text = "v1.5.0  ·  官方 ADB  ·  Windows 10 / 11", ForeColor = Color.DimGray, AutoSize = true }, 0, 6);
         Shown += async (_, _) => { AddFiles(initial); LoadNetworks(); await Guard(RefreshDevices); };
         devices.SelectedIndexChanged += (_, _) => UpdateInstall();
         FormClosing += (_, e) => { if (installing && MessageBox.Show("安装仍在进行。退出会停止后续队列，当前安装结果需在设备上确认。是否退出？", Text, MessageBoxButtons.YesNo) != DialogResult.Yes) e.Cancel = true; };
@@ -201,6 +201,7 @@ public class MainForm : Form
     }
     Task Export() { using var dialog = new SaveFileDialog { Filter = "文本日志|*.txt", FileName = "安卓设备安装日志.txt" }; if (dialog.ShowDialog(this) == DialogResult.OK) File.WriteAllText(dialog.FileName, logs.Text, Encoding.UTF8); return Task.CompletedTask; }
     Task Preparation() { using var guide = new PreparationForm(); guide.ShowDialog(this); return Task.CompletedTask; }
+    async Task Troubleshoot() { using var tools = new TroubleshootingForm(adb, (devices.SelectedItem as Device)?.Serial ?? address.Text, logs.Text); tools.ShowDialog(this); await RefreshDevices(); }
     Task Tools() { if (devices.SelectedItem is not Device { Ready: true } target) throw new IOException("请先连接并选择设备。"); using var tools = new DeviceToolsForm(adb, target); tools.ShowDialog(this); return Task.CompletedTask; }
     Task Help() { MessageBox.Show("1. 设备设置中开启网络 ADB 或无线调试，与电脑接入同一局域网。\n2. 发现设备或输入 IP:端口，设备弹出授权时选择允许。\n3. 选择目标设备，拖入 APK 后开始安装。\n\n拆分 APK 必须选齐同一应用的 base 与 split 文件。XAPK/APKM/AAB 不能直接安装。\n无线配对使用设备显示的配对端口与连接端口，两者通常不同。\n\n本工具不能远程开启被固件关闭的网络 ADB 服务。断开连接不会关闭设备调试服务。", "使用帮助"); return Task.CompletedTask; }
 }

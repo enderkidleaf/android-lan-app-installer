@@ -50,10 +50,46 @@ public record Lan(string Name, string Ip, uint Mask)
             .Select(a => new Lan(n.Name, a.Address.ToString(), Number(a.IPv4Mask.ToString())))).ToList();
 }
 
-public record CommandResult(int Code, string Output, bool TimedOut = false) { public bool Success => Code == 0 && !TimedOut; }
+public record CommandResult(int Code, string Output, bool TimedOut = false, bool Cancelled = false, bool OutputLimited = false) { public bool Success => Code == 0 && !TimedOut && !Cancelled && !OutputLimited; }
 
 public class AdbClient(string executable)
 {
+    public async Task<CommandResult> ConsoleRun(string[] args, int seconds, CancellationToken stop, Action<string>? output = null, int limit = 256 * 1024)
+    {
+        if (stop.IsCancellationRequested) return new(-1, "", Cancelled: true);
+        var start = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true, StandardOutputEncoding = System.Text.Encoding.UTF8, StandardErrorEncoding = System.Text.Encoding.UTF8 };
+        foreach (var arg in args) start.ArgumentList.Add(arg);
+        using var process = new Process { StartInfo = start };
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(seconds));
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(stop, timeout.Token);
+        var buffer = new System.Text.StringBuilder(); object gate = new(); int bytes = 0; bool limited = false;
+        process.Start(); process.StandardInput.Close();
+        async Task Read(StreamReader reader)
+        {
+            char[] chars = new char[2048];
+            try {
+                int count;
+                while ((count = await reader.ReadAsync(chars.AsMemory(), linked.Token)) > 0) {
+                    lock (gate) {
+                        string value = new(chars, 0, count); int size = System.Text.Encoding.UTF8.GetByteCount(value);
+                        if (bytes + size > limit) {
+                            int keep = Math.Min(value.Length, Math.Max(0, limit - bytes));
+                            while (keep > 0 && System.Text.Encoding.UTF8.GetByteCount(value.AsSpan(0, keep)) > limit - bytes) keep--;
+                            value = value[..keep]; limited = true;
+                        }
+                        buffer.Append(value); bytes += System.Text.Encoding.UTF8.GetByteCount(value); output?.Invoke(buffer.ToString());
+                        if (limited) linked.Cancel();
+                    }
+                    if (limited) break;
+                }
+            } catch (OperationCanceledException) { }
+        }
+        var stdout = Read(process.StandardOutput); var stderr = Read(process.StandardError);
+        try { await process.WaitForExitAsync(linked.Token); }
+        catch (OperationCanceledException) { if (!process.HasExited) process.Kill(); await process.WaitForExitAsync(); }
+        await Task.WhenAll(stdout, stderr);
+        return new(process.ExitCode, buffer.ToString(), timeout.IsCancellationRequested && !stop.IsCancellationRequested && !limited, stop.IsCancellationRequested, limited);
+    }
     public async Task<CommandResult> Run(string[] args, int seconds = 15, string? input = null)
     {
         var start = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true, StandardOutputEncoding = System.Text.Encoding.UTF8, StandardErrorEncoding = System.Text.Encoding.UTF8 };
