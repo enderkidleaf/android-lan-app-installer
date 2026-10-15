@@ -41,3 +41,7 @@ dotnet run --project CrossPlatformTests/WindowsCoreTests.csproj -c Release
 ```
 
 目前完成了交叉编译、打包验证和 27 项在 macOS 上执行的核心测试。尚未在真实 Windows 设备上运行界面。Windows 不使用模拟 ADB 协议，连接与安装由内置官方 ADB 执行。
+
+## v1.4.0 设备工具
+
+连接设备后可打开设备工具：读取当前用户的应用包名列表并搜索，打开或停止应用；用户应用可在确认后卸载或清除全部数据。系统应用不提供卸载和清除数据。提供方向、确认、返回、主页、音量遥控，以及截图预览和 PNG 保存。工具固定使用打开时所选的目标地址，详情见根目录 README。
