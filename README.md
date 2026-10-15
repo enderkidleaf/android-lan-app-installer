@@ -14,7 +14,7 @@
 
 ## 下载
 
-源码当前版本为 v1.3.0，新增独立的「已安装」区域。已发布的版本见 [GitHub Releases](https://github.com/enderkidleaf/android-lan-app-installer/releases)。仓库名称已统一为 `android-lan-app-installer`，应用标识与安卓签名保持兼容。旧版本下载包仍保留原来的名称。
+源码当前版本为 v1.4.0，新增设备应用管理、虚拟遥控器和截图。已发布的版本见 [GitHub Releases](https://github.com/enderkidleaf/android-lan-app-installer/releases)。仓库名称已统一为 `android-lan-app-installer`，应用标识与安卓签名保持兼容。旧版本下载包仍保留原来的名称。
 
 在 [GitHub Releases](https://github.com/enderkidleaf/android-lan-app-installer/releases) 选择对应平台的安装包。macOS 包为 `android-lan-app-installer-macOS.zip`；Windows 包为 `android-lan-app-installer-Windows-x64.zip`；安卓为 `android-lan-app-installer-Android.apk`。
 
@@ -50,6 +50,16 @@ Windows 与安卓详细说明分别见 [Windows/README.md](Windows/README.md) �
 
 「已安装」是本次会话的安装成功记录，不是目标设备的全部应用列表。清空待安装文件不会清除成功记录；「清空记录」只清除显示记录，不会卸载应用或把旧文件重新加入队列。需要再次安装同一 APK 或换设备安装时，可主动重新选择该文件。安卓端成功后释放该 APK 的临时缓存，保留名称、大小和目标等显示信息，原始 APK 不受影响。
 
+## 设备工具
+
+连接并选择设备后，macOS 从侧栏打开「设备应用」「虚拟遥控器」「一键截图」；Windows 点击「设备工具」；安卓点击「设备应用 · 遥控器 · 截图」。工具窗口固定显示打开时所选的设备与地址，操作不会转发到其他设备。
+
+- **设备应用**：点击刷新读取当前 Android 用户的实际应用列表，按包名搜索；默认仅显示用户应用，可勾选包含系统应用。支持打开、强制停止、卸载和清除数据。打开时先查找电视入口，再查找手机桌面入口，无入口的应用会给出说明。卸载和清除数据需再次确认目标地址与包名；清除数据会删除登录状态、设置和本地数据，不只是清缓存。系统应用仅允许查看、打开与强制停止，不提供卸载或清除数据。
+- **虚拟遥控器**：方向键、确认、返回、主页和音量。部分厂商需要额外开启模拟输入权限；发送成功表示设备接受了命令，不保证每个界面都响应。
+- **截图**：手动截取当前画面，预览后保存 PNG；安卓使用系统文件选择器保存，不要求全部文件访问权限。截图最多 32 MB，预览会缩小大型画面；受保护的内容可能是黑色。桌面版本会清理设备端和本地的截图临时文件。
+
+设备应用列表与「已安装」会话记录各自独立；管理设备应用不会把旧 APK 放回安装队列。应用和截图仅经本地网络传输，无云端上传。此版本不包含文件管理、录屏或实时投屏。
+
 ## 查找与连接
 
 - 扫描所选 IPv4 网卡的真实子网，最多扫描本机所在的 /24（不超过 253 个其他地址），仅检测 TCP 5555。
@@ -74,6 +84,7 @@ macOS 应用为本地构建并使用 ad-hoc 签名，未经过 Apple 公证。�
 bash Scripts/build.sh
 bash Scripts/test.sh
 bash Scripts/test-install-queue.sh
+bash Scripts/test-device-tools.sh
 ```
 
 构建脚本在 `Resources/adb` 缺失时从 Google 官方下载 Platform Tools；正式应用内置 ADB，不需要用户另行安装 Python、Node、Homebrew 或 Android Studio。
