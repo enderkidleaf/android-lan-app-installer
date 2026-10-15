@@ -2,7 +2,7 @@ plugins { id 'com.android.application' }
 android {
     namespace 'com.enderkidleaf.tvinstaller'
     compileSdk 36
-    defaultConfig { applicationId 'com.enderkidleaf.tvinstaller'; minSdk 26; targetSdk 36; versionCode 130; versionName '1.3.0' }
+    defaultConfig { applicationId 'com.enderkidleaf.tvinstaller'; minSdk 26; targetSdk 36; versionCode 140; versionName '1.4.0' }
     sourceSets { main { assets.srcDirs = ['../../Shared'] } }
     compileOptions { sourceCompatibility JavaVersion.VERSION_1_8; targetCompatibility JavaVersion.VERSION_1_8 }
 }
